@@ -21,3 +21,8 @@
 
 * **Monitorowanie RSSI:** Implementacja modułu oprogramowania do ciągłego pobierania i przetwarzania wartości siły sygnału (RSSI) z interfejsu sieciowego.
 * **Statyczna Wizualizacja (Brak lokalizacji):** Przygotowanie kodu generującego mapę cieplną (heatmapę). Z racji braku aktywnego systemu lokalizacji przestrzennej na tym etapie prac, system będzie rejestrował i wizualizował dane o sygnale w sposób statyczny. Moduł udowodni zdolność systemu do przetwarzania danych RSSI, jednak na tym etapie pomiary nie będą jeszcze korelowane ze zmieniającymi się w czasie współrzędnymi robota na mapie.
+  
+## 8. Symulacja i Testowanie Wirtualne (Gazebo)
+- **Model cyfrowy:** Opracowanie platformy w środowisku symulacyjnym, uwzględniającej wymiary, właściwości fizyczne (masa, inercja), kinematykę układu oraz bryły kolizyjne robota.
+- **Środowisko wirtualne:** Stworzenie w środowisku Gazebo zamkniętej przestrzeni testowej, odpowiednio odzwierciedlającej zakładane środowisko operacyjne (ściany, statyczne przeszkody) w celu symulacji nawigacji typu indoor.
+- **Dodanie i wstępna implementacja mapowania 2D oraz SLAM**
