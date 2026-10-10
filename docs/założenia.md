@@ -36,3 +36,8 @@
 * **Nawierzchnia i trakcja:** Podłoże musi być twarde i płaskie. Tarcie między kołami a podłożem musi umożliwiać płynny ruch przy zachowaniu limitu mocy i momentu obrotowego na wałach silników, aby nie doprowadzić do ich przeciążenia. Wyklucza się poruszanie po dywanach i wykładzinach o wysokim/grubym włosiu.
 * **Optyka otoczenia:** Z przestrzeni roboczej należy usunąć lustra, szyby oraz inne powierzchnie silnie odbijające światło znajdujące się na linii wzroku sensora. Odbicia mogłyby generować fałszywe odczyty, artefakty na mapie i powodować błędy skanera.
 * **Ograniczenia wysokościowe przeszkód (martwa strefa):** Z uwagi na specyfikę skanowania 2D, wszystkie przeszkody w otoczeniu muszą przecinać płaszczyznę skanowania. Wszelkie obiekty, których wysokość jest mniejsza niż punkt zamocowania modułu LIDAR na robocie, nie zostaną wykryte i stanowią obszar zagrożenia kolizją. Zakłada się, że przestrzeń robocza nie posiada obiektów niższych niż punkt zamocowania czujnika LIDAR.
+
+## 8. Symulacja i Testowanie Wirtualne (Gazebo)
+- **Model cyfrowy:** Opracowanie platformy w środowisku symulacyjnym, uwzględniającej wymiary, właściwości fizyczne (masa, inercja), kinematykę układu oraz bryły kolizyjne robota.
+- **Środowisko wirtualne:** Stworzenie w środowisku Gazebo zamkniętej przestrzeni testowej, odpowiednio odzwierciedlającej zakładane środowisko operacyjne (ściany, statyczne przeszkody) w celu symulacji nawigacji typu indoor.
+- **Cel symulacji:** Bezpieczne rozwijanie, testowanie i optymalizacja algorytmów (SLAM, Nav2, fuzja EKF) w środowisku wirtualnym, przed ich docelowym wdrożeniem na rzeczywistym robocie, co znacząco zminimalizuje ryzyko kolizji i uszkodzeń sprzętu.
