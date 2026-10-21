@@ -10,4 +10,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY wifi_scanner.py /app/wifi_scanner.py
 
-CMD ["python3", "/app/wifi_scanner.py"]
+ENTRYPOINT ["/ros_entrypoint.sh"]
+CMD ["python3", "-u", "/app/wifi_scanner.py"]
