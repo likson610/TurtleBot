@@ -8,6 +8,7 @@
 #include <hardware_interface/system_interface.hpp>
 #include <rclcpp_lifecycle/node_interfaces/lifecycle_node_interface.hpp>
 #include <rclcpp_lifecycle/state.hpp>
+#include <libserial/SerialPort.h>
 
 namespace turtlebot_firmware
 {
@@ -34,6 +35,9 @@ private:
   std::vector<double> cmd_vel_;
   std::vector<double> state_pos_;
   std::vector<double> state_vel_;
+  
+  LibSerial::SerialPort mcu_serial_;
+  std::string serial_port_name_;
 };
 
 }
