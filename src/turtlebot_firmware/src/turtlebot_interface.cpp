@@ -7,13 +7,28 @@ namespace turtlebot_firmware
 
 TurtlebotInterface::TurtlebotInterface() {}
 
-TurtlebotInterface::~TurtlebotInterface() {}
+TurtlebotInterface::~TurtlebotInterface()
+{
+  if (mcu_serial_.IsOpen()) {
+    try {
+      mcu_serial_.Close();
+    } catch (...) {
+      RCLCPP_FATAL_STREAM(rclcpp::get_logger("TurtlebotInterface"), "Failed to close " << serial_port_name_);
+    }
+  }
+}
 
 CallbackReturn TurtlebotInterface::on_init(const hardware_interface::HardwareInfo & hw_info)
 {
   auto init_res = hardware_interface::SystemInterface::on_init(hw_info);
   if (init_res != CallbackReturn::SUCCESS) {
     return init_res;
+  }
+
+  try {
+    serial_port_name_ = info_.hardware_parameters.at("port");
+  } catch (const std::out_of_range &) {
+    return CallbackReturn::FAILURE;
   }
 
   auto j_size = info_.joints.size();
@@ -30,11 +45,21 @@ CallbackReturn TurtlebotInterface::on_activate(const rclcpp_lifecycle::State &)
   state_pos_.assign(2, 0.0);
   state_vel_.assign(2, 0.0);
 
+  try {
+    mcu_serial_.Open(serial_port_name_);
+    mcu_serial_.SetBaudRate(LibSerial::BaudRate::BAUD_115200);
+  } catch (...) {
+    return CallbackReturn::FAILURE;
+  }
+
   return CallbackReturn::SUCCESS;
 }
 
 CallbackReturn TurtlebotInterface::on_deactivate(const rclcpp_lifecycle::State &)
 {
+  if (mcu_serial_.IsOpen()) {
+    mcu_serial_.Close();
+  }
   return CallbackReturn::SUCCESS;
 }
 
@@ -45,6 +70,24 @@ hardware_interface::return_type TurtlebotInterface::read(const rclcpp::Time &, c
 
 hardware_interface::return_type TurtlebotInterface::write(const rclcpp::Time &, const rclcpp::Duration &)
 {
+  std::stringstream out_msg;
+  
+  auto s_right = (cmd_vel_.at(0) >= 0) ? 'p' : 'n';
+  auto s_left = (cmd_vel_.at(1) >= 0) ? 'p' : 'n';
+
+  std::string pad_r = (std::abs(cmd_vel_.at(0)) < 10.0) ? "0" : "";
+  std::string pad_l = (std::abs(cmd_vel_.at(1)) < 10.0) ? "0" : "";
+
+  out_msg << std::fixed << std::setprecision(2) 
+          << "r" << s_right << pad_r << std::abs(cmd_vel_.at(0)) << ","
+          << "l" << s_left << pad_l << std::abs(cmd_vel_.at(1)) << ",";
+
+  try {
+    mcu_serial_.Write(out_msg.str());
+  } catch (...) {
+    return hardware_interface::return_type::ERROR;
+  }
+
   return hardware_interface::return_type::OK;
 }
 
