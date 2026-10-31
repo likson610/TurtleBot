@@ -38,6 +38,7 @@ private:
   
   LibSerial::SerialPort mcu_serial_;
   std::string serial_port_name_;
+  rclcpp::Time prev_time_;
 };
 
 }
