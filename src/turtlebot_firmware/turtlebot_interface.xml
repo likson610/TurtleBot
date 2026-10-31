@@ -1,0 +1,10 @@
+<library path="turtlebot_firmware">
+    <class name="turtlebot_firmware/TurtlebotInterface"
+      type="turtlebot_firmware::TurtlebotInterface"
+      base_class_type="hardware_interface::SystemInterface"
+    >
+      <description>
+      Mobile Robot Hardware Interface for wheel and servo control
+      </description>
+    </class>
+  </library>
