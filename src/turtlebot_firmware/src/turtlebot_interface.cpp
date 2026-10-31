@@ -35,6 +35,8 @@ CallbackReturn TurtlebotInterface::on_init(const hardware_interface::HardwareInf
   cmd_vel_.reserve(j_size);
   state_pos_.reserve(j_size);
   state_vel_.reserve(j_size);
+  
+  prev_time_ = rclcpp::Clock().now();
 
   return CallbackReturn::SUCCESS;
 }
@@ -65,6 +67,31 @@ CallbackReturn TurtlebotInterface::on_deactivate(const rclcpp_lifecycle::State &
 
 hardware_interface::return_type TurtlebotInterface::read(const rclcpp::Time &, const rclcpp::Duration &)
 {
+  if (mcu_serial_.IsDataAvailable()) {
+    auto current_time = rclcpp::Clock().now();
+    auto delta_t = (current_time - prev_time_).seconds();
+    
+    std::string raw_msg;
+    mcu_serial_.ReadLine(raw_msg);
+    std::stringstream stream_msg(raw_msg);
+    std::string token;
+    
+    while (std::getline(stream_msg, token, ',')) {
+      if (token.empty()) continue;
+      
+      auto sign_val = (token.at(1) == 'p') ? 1 : -1;
+      auto parsed_vel = std::stod(token.substr(2));
+
+      if (token.at(0) == 'r') {
+        state_vel_.at(0) = sign_val * parsed_vel;
+        state_pos_.at(0) += state_vel_.at(0) * delta_t;
+      } else if (token.at(0) == 'l') {
+        state_vel_.at(1) = sign_val * parsed_vel;
+        state_pos_.at(1) += state_vel_.at(1) * delta_t;
+      }
+    }
+    prev_time_ = current_time;
+  }
   return hardware_interface::return_type::OK;
 }
 
