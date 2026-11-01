@@ -5,19 +5,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wireless-tools \
     python3-pip \
     net-tools \
+    build-essential \
+    python3-colcon-common-extensions \
     ros-jazzy-rosidl-default-generators \
     ros-jazzy-rosidl-default-runtime \
-    build-essential \
+    ros-jazzy-std-msgs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ros2_ws
 COPY wifi_msgs /ros2_ws/src/wifi_msgs
 
-RUN . /opt/ros/jazzy/setup.sh && colcon build --symlink-install
+RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && colcon build"
 
+WORKDIR /app
 COPY wifi_scanner.py /app/wifi_scanner.py
-
-RUN echo '#!/bin/bash\nsource /opt/ros/jazzy/setup.bash\nsource /ros2_ws/install/setup.bash\nexec "$@"' > /entrypoint.sh && chmod +x /entrypoint.sh
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python3", "-u", "/app/wifi_scanner.py"]
