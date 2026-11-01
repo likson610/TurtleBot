@@ -3,6 +3,7 @@ services:
     build: .
     container_name: ros2_wifi_scanner
     network_mode: "host"
+    ipc: "host"
     privileged: true
     volumes:
       - /dev:/dev
@@ -11,5 +12,5 @@ services:
       - ROS_DOMAIN_ID=0
       - PYTHONUNBUFFERED=1
       - WIFI_INTERFACE=wlan1
-      #- SCAN_FREQUENCIES=2412 2437 2462
+      - SCAN_FREQUENCIES=2412 2437 2462
     restart: unless-stopped
