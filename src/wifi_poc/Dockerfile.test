@@ -1,0 +1,20 @@
+FROM ros:jazzy-ros-base
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-colcon-common-extensions \
+    ros-jazzy-rosidl-default-generators \
+    ros-jazzy-rosidl-default-runtime \
+    ros-jazzy-std-msgs \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /test_ws/src
+COPY wifi_msgs /test_ws/src/wifi_msgs
+
+WORKDIR /test_ws
+RUN /bin/bash -c "source /opt/ros/jazzy/setup.bash && colcon build"
+
+RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc && \
+    echo "source /test_ws/install/setup.bash" >> ~/.bashrc
+
+CMD ["/bin/bash"]
