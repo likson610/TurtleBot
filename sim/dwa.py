@@ -1,8 +1,3 @@
-"""Lokalny dobór prędkości DWA, przewidywanie ruchu i hamowanie.
-
-Ustawienia jazdy znajdują się w DWAConfig. Moduł nie wymaga ROS.
-Pochodzenie algorytmów: README.md.
-"""
 import math
 
 import numpy as np
@@ -47,14 +42,10 @@ class DWAConfig:
     reaction_time = 0.30
 
 
-# --- WYBÓR PRĘDKOŚCI ---
+# --- Speed config ---
 
 def dwa_control(pose, velocity, goal, obstacles, grid, resolution, origin, cfg):
-    """Zwróć prędkości (v, w), sprawdzając ruch na mapie i skanach.
 
-    pose = (x, y, yaw), velocity = (v, w), goal = (x, y).
-    grid to mapa z marginesem od przeszkód; origin = (x, y, yaw).
-    """
     x, y, theta = pose
     v, w = velocity
     goal_x, goal_y = goal
@@ -100,7 +91,6 @@ def dwa_control(pose, velocity, goal, obstacles, grid, resolution, origin, cfg):
 
 
 def score_heading(traj, goal_x, goal_y):
-    """Oceń kierunek i odległość końca przewidywanej trajektorii od celu."""
     end_x, end_y, end_theta = traj[-1]
     goal_angle   = math.atan2(goal_y - end_y, goal_x - end_x)
     # atan2(sin/cos) - angle normalization
@@ -111,7 +101,7 @@ def score_heading(traj, goal_x, goal_y):
     return w_head * ((math.pi - angle_diff) / math.pi) + 0.3 * (1.0 / (1.0 + math.hypot(goal_x - end_x, goal_y - end_y)))
 
 
-# --- PRZEWIDYWANIE RUCHU I ODLEGŁOŚCI ---
+# --- Move and distance prediction ---
 
 def bounded_samples(low, high, resolution):
     count = max(2, math.ceil((high - low) / resolution) + 1)
@@ -135,7 +125,6 @@ def trajectory(x, y, yaw, v, w, dt, horizon):
 
 
 def path_clearance(traj, points):
-    """Minimum distance to swept line segments, including the current position."""
     if points is None or len(points) == 0:
         return math.inf
     path = np.asarray(traj, dtype=float)[:, :2]
@@ -151,10 +140,9 @@ def path_clearance(traj, points):
     return float(np.linalg.norm(obstacles[None, :, :]-nearest, axis=2).min())
 
 
-# --- SPRAWDZANIE DROGI HAMOWANIA ---
+# --- Check braking path---
 
 def braking_path(v, w, linear_deceleration, angular_deceleration, reaction_time, dt=0.05):
-    """Sweep through reaction delay and gradual braking, in the base frame."""
     horizon = reaction_time + max(abs(v)/linear_deceleration, abs(w)/angular_deceleration)
     path = [(0.0, 0.0, 0.0)]
     elapsed = 0.0
