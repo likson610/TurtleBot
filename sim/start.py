@@ -5,7 +5,7 @@ import sys
 import time
 
 HERE = Path(__file__).resolve().parent
-KEY_TIMEOUT = 0.6
+KEY_TIMEOUT = 0.6  # Terminal key-repeat delay is commonly about half a second.
 
 # SLAM settings
 SLAM = dict(
@@ -64,7 +64,7 @@ def bridge_arguments():
 
 
 class WASDControl:
-    """Terminal controls with a monotonic watchdog; independent of ROS."""
+    """Terminal controls"""
     def __init__(self, speed, turn, timeout=KEY_TIMEOUT):
         self.speed, self.turn, self.timeout = speed, turn, timeout
         self.linear, self.angular = 0.0, 0.0
@@ -105,7 +105,7 @@ class WASDControl:
             self.linear, self.angular = movement[key]
             self.last_key_time = now
         else:
-            self.stop()  # Space, Enter and other unassigned keys stop movement.
+            self.stop()  # stop movement.
 
     def command(self, now):
         if self.last_key_time is None or now - self.last_key_time >= self.timeout:
@@ -114,7 +114,7 @@ class WASDControl:
 
 
 def run_keyboard(args):
-    """Publish TwistStamped directly; no teleop package or extra file needed."""
+    """Publish TwistStamped"""
     if not sys.stdin.isatty():
         print('WASD wymaga interaktywnego terminala Ubuntu.', file=sys.stderr)
         return 1
@@ -149,7 +149,7 @@ def run_keyboard(args):
             ready, _, _ = select.select([descriptor], [], [], 0.05)
             if ready:
                 data = os.read(descriptor, 64)
-                if not data:  # Closed terminal/input: publish STOP in finally.
+                if not data:
                     break
                 for key in data.decode('utf-8', errors='ignore'):
                     control.feed(key, time.monotonic())
@@ -159,7 +159,7 @@ def run_keyboard(args):
     except KeyboardInterrupt:
         pass
     finally:
-        # publish stop before restoring the terminal
+        # publish STOP before restoring the terminal
         try:
             if publisher is not None and rclpy.ok():
                 for _ in range(3):
@@ -254,7 +254,7 @@ def build_launch(args):
 
     def on_spawn_exit(event, _context):
         if event.returncode:
-            return [EmitEvent(event=Shutdown(reason='Robot nie wystawiony'))]
+            return [EmitEvent(event=Shutdown(reason='Nie udało się wstawić Burgera do świata.'))]
         return after_spawn
 
     actions.append(RegisterEventHandler(OnProcessExit(target_action=spawn, on_exit=on_spawn_exit)))

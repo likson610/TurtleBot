@@ -22,7 +22,6 @@ def pose_xyyaw(transform):
 
 
 class RobotNavigation(Node):
-    """Obsługa ROS, celów i nadzorowanie autonomicznej jazdy."""
     def __init__(self):
         super().__init__('robot_navigation_node')
         self.dwa_cfg = DWAConfig()
@@ -104,14 +103,12 @@ class RobotNavigation(Node):
 
         # binary mask (1 -> obstacle)
         raw = np.where(data > 50, 1, 0).astype(bool)
-        # dilatation (bold)
-        # dilation underestimates clearance in diagonal directions.
         radius = max(self.dwa_cfg.inflation_radius,
                      self.dwa_cfg.robo_radius + self.dwa_cfg.safety_margin)
         inflation_cells = max(1, math.ceil(radius/self.map_resolution + math.sqrt(2)/2))
         yy, xx = np.ogrid[-inflation_cells:inflation_cells+1, -inflation_cells:inflation_cells+1]
         inflated = binary_dilation(raw, structure=(xx*xx+yy*yy <= inflation_cells**2))
-        # Only observed free cells may be used by A* and DWA.
+        # only observed free cells may be used by A* and DWA.
         self.grid_map = (inflated | (data != 0)).astype(np.uint8)
 
         remaining = [(x, y, 0.0) for x, y in self.path[self.target_idx:]]
@@ -122,7 +119,7 @@ class RobotNavigation(Node):
             self.publish_path_for_rviz()
             self.get_logger().warning('Mapa zmieniła przebieg trasy: STOP i ponowne planowanie.')
 
-        # auto-drive mode, lack of goal and current pose is none -> explore
+        # auto-drive mode
         if self.is_exploring and self.current_goal is None and self.get_robot_pose() is not None:
             self.trigger_exploration()
 
@@ -155,9 +152,8 @@ class RobotNavigation(Node):
         if current_pose is not None:
             self.run_astar(current_pose[0], current_pose[1], goal_x, goal_y)
 
-
     def trigger_exploration(self):
-        """The farthest distance of robot"""
+        """The farthest reachable point."""
         pose = self.get_robot_pose()
         if pose is None or self.init_map_data is None:
             return
@@ -207,7 +203,7 @@ class RobotNavigation(Node):
 
     def run_astar(self, start_x, start_y, goal_x, goal_y):
         '''Operate A* algorithm'''
-        # stop before planning a long calculation must not retain a drive command.
+        # stop before planning
         self.stop()
         self.path = []
         self.target_idx = 0
@@ -253,7 +249,40 @@ class RobotNavigation(Node):
         return None
 
 
+    def check_if_stuck(self, x, y):
+        '''Operate stuck detection'''
+        now = self.get_clock().now()
+        if self.last_position is None:
+            self.last_position = (x, y)
+            self.last_position_time = now
+            return
 
+        # Euklidean distance of motion - distnance stuck detection
+        dist_moved = math.hypot(x - self.last_position[0], y - self.last_position[1])
+        if dist_moved > self.stuck_distance:
+            self.last_position = (x, y)
+            self.last_position_time = now
+            return
+
+        # time stuck detection
+        elapsed = (now - self.last_position_time).nanoseconds / 1e9
+        if elapsed < self.stuck_timeout: return
+
+        # time from last replan
+        if self.last_replan_time is not None:
+            if (now - self.last_replan_time).nanoseconds / 1e9 < self.replan_cooldown: return
+
+        self.get_logger().warn("Stuck - attempting to escape...")
+        self.last_replan_time = now
+        self.last_position = (x, y)
+        self.last_position_time = now
+
+        # stuck during exploration -> change goal point
+        if self.is_exploring:
+            self.trigger_exploration()
+        elif self.current_goal is not None:
+            if not self.run_astar(x, y, *self.current_goal):
+                self.path = []
 
     def control_loop(self):
         '''Main control function'''
@@ -275,7 +304,7 @@ class RobotNavigation(Node):
         except (LookupException, ConnectivityException, ExtrapolationException):
             self.stop()
             return
-        # independent of the SLAM map: a bad map must not override a nearby wall.
+        # independent of the SLAM map
         if not braking_clear(self.measured_v, self.measured_w, nearby, self.dwa_cfg, scan_age):
             self.halt('Przeszkoda na drodze hamowania: STOP na podstawie LIDAR-u.')
             return
@@ -343,9 +372,8 @@ class RobotNavigation(Node):
 
         self.current_v, self.current_w = best_v, best_w
 
-
     def scan_to_coords(self, rx, ry, th, scan):
-        # lidar offset must come from TF
+        # A lidar offset must come from TF, not an assumption that it is at the base origin.
         t = self.tf_buffer.lookup_transform('map', scan.header.frame_id, Time.from_msg(scan.header.stamp))
         q = t.transform.rotation
         yaw = math.atan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z))
@@ -385,9 +413,7 @@ class RobotNavigation(Node):
 
     def grid_to_world(self, r, c):
         return grid_to_world(r, c, self.map_resolution, self.map_origin)
-
-    # public robot path
-
+    
     def publish_path_for_rviz(self):
         '''Visualize planned path'''
         msg = Path(); msg.header.frame_id = 'map'; msg.header.stamp = self.get_clock().now().to_msg()
@@ -411,44 +437,6 @@ class RobotNavigation(Node):
             self.get_logger().warning(reason)
             self.last_stop_reason = reason
         self.stop()
-
-    def check_if_stuck(self, x, y):
-        '''Operate stuck detection'''
-        now = self.get_clock().now()
-        if self.last_position is None:
-            self.last_position = (x, y)
-            self.last_position_time = now
-            return
-
-        # euklidean distance of motion - distnance stuck detection
-        dist_moved = math.hypot(x - self.last_position[0], y - self.last_position[1])
-        if dist_moved > self.stuck_distance:
-            self.last_position = (x, y)
-            self.last_position_time = now
-            return
-
-        # time stuck detection
-        elapsed = (now - self.last_position_time).nanoseconds / 1e9
-        if elapsed < self.stuck_timeout: 
-            return
-
-        # time from last replan (zabezpieczenie przed ciągłym replanowaniem)
-        if self.last_replan_time is not None:
-            if (now - self.last_replan_time).nanoseconds / 1e9 < self.replan_cooldown: 
-                return
-
-        self.get_logger().warn("Stuck - attempting to escape...")
-        
-        self.last_replan_time = now
-        self.last_position = (x, y)
-        self.last_position_time = now
-
-        # stuck during exploration -> change goal point
-        if self.is_exploring:
-            self.trigger_exploration()
-        elif self.current_goal is not None:
-            if not self.run_astar(x, y, *self.current_goal):
-                self.path = []
 
 
 def main(args=None):
