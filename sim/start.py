@@ -227,7 +227,7 @@ def build_launch(args):
                             '-x', str(args.x), '-y', str(args.y)])
     slam = LifecycleNode(package='slam_toolbox', executable='async_slam_toolbox_node',
                          name='slam_toolbox', namespace='', parameters=[SLAM], output='screen')
-    # Configure and activate SLAM automatically, without a YAML or another launcher.
+
     activate = RegisterEventHandler(OnStateTransition(
         target_lifecycle_node=slam, start_state='configuring', goal_state='inactive',
         entities=[EmitEvent(event=ChangeState(
