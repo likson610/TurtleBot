@@ -1,7 +1,3 @@
-"""Planowanie globalnej trasy A* i operacje na siatce mapy.
-
-Nie wymaga ROS. Pochodzenie algorytmów: README.md.
-"""
 import math
 from collections import deque
 from heapq import heappop, heappush
@@ -9,7 +5,7 @@ from heapq import heappop, heappush
 import numpy as np
 
 
-# --- PLANOWANIE TRASY A* ---
+# --- Route planning A* ---
 
 
 def get_neighbors(pos, grid_map, rows, cols):
@@ -95,11 +91,6 @@ def a_star(grid_map, start, goal):
 
 
 def reachable_cells(grid_map, start):
-    """Zaznacz wolne pola połączone ze startem, bez przecinania narożników.
-
-    Te same zasady przejazdu co w A*. Pozwala odrzucić nieosiągalne cele
-    eksploracji przed uruchomieniem planowania trasy.
-    """
     rows, cols = grid_map.shape
     reachable = np.zeros((rows, cols), dtype=bool)
     if start is None:
@@ -120,7 +111,7 @@ def reachable_cells(grid_map, start):
     return reachable
 
 
-# --- WSPÓŁRZĘDNE MAPY I SPRAWDZANIE PRZEJAZDU ---
+# --- Coordinates and checking trajectory ---
 
 
 def world_to_grid(x, y, resolution, origin):
