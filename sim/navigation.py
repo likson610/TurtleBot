@@ -297,7 +297,10 @@ class RobotNavigation(Node):
             return
         x, y, theta = current_pose
 
-
+        self.check_if_stuck(x, y)
+        if not self.path:
+            self.stop()
+            return
 
         target_x, target_y = self.path[self.target_idx]
         # goal reached
@@ -408,6 +411,44 @@ class RobotNavigation(Node):
             self.get_logger().warning(reason)
             self.last_stop_reason = reason
         self.stop()
+
+    def check_if_stuck(self, x, y):
+        '''Operate stuck detection'''
+        now = self.get_clock().now()
+        if self.last_position is None:
+            self.last_position = (x, y)
+            self.last_position_time = now
+            return
+
+        # euklidean distance of motion - distnance stuck detection
+        dist_moved = math.hypot(x - self.last_position[0], y - self.last_position[1])
+        if dist_moved > self.stuck_distance:
+            self.last_position = (x, y)
+            self.last_position_time = now
+            return
+
+        # time stuck detection
+        elapsed = (now - self.last_position_time).nanoseconds / 1e9
+        if elapsed < self.stuck_timeout: 
+            return
+
+        # time from last replan (zabezpieczenie przed ciągłym replanowaniem)
+        if self.last_replan_time is not None:
+            if (now - self.last_replan_time).nanoseconds / 1e9 < self.replan_cooldown: 
+                return
+
+        self.get_logger().warn("Stuck - attempting to escape...")
+        
+        self.last_replan_time = now
+        self.last_position = (x, y)
+        self.last_position_time = now
+
+        # stuck during exploration -> change goal point
+        if self.is_exploring:
+            self.trigger_exploration()
+        elif self.current_goal is not None:
+            if not self.run_astar(x, y, *self.current_goal):
+                self.path = []
 
 
 def main(args=None):
