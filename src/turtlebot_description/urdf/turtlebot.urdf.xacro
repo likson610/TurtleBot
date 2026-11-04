@@ -1,6 +1,31 @@
 <?xml version="1.0"?>
 <robot name="turtlebot" xmlns:xacro="http://ros.org/wiki/xacro">
 
+  <ros2_control name="TurtlebotHardware" type="system">
+    <hardware>
+      <plugin>turtlebot_firmware/TurtlebotInterface</plugin>
+      <param name="port">/dev/ttyUSB0</param>
+    </hardware>
+
+    <joint name="wheel_right_joint">
+      <command_interface name="velocity">
+        <param name="min">-10</param>
+        <param name="max">10</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+    </joint>
+
+    <joint name="wheel_left_joint">
+      <command_interface name="velocity">
+        <param name="min">-10</param>
+        <param name="max">10</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+    </joint>
+  </ros2_control>
+
   <link name="base_footprint"/>
   
   <link name="base_link">
