@@ -21,7 +21,7 @@ class WiFiScannerNode(Node):
         print(f"[START] Węzeł wifi_scanner uruchomiony na interfejsie {self.interface}", flush=True)
 
     def scan_and_publish(self):
-        cmd = ["iw", "dev", self.interface, "scan"]
+        cmd = ["iw", "dev", self.interface, "scan", "flush"]
         if self.freqs:
             cmd.extend(["freq"] + self.freqs.split())
 
