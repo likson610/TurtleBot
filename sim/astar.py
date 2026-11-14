@@ -46,15 +46,16 @@ def heuristic(p_start, p_end):
     return max(dr, dc) + (2 ** 0.5 - 1) * min(dr, dc)
 
 
-def reconstruct_path(came_from, current, start, rows):
+def reconstruct_path(came_from, current, start):
     '''Invert path'''
 
     path = [[current[0], current[1]]]
 
     while current != start:
         current = came_from[current]
-        path.insert(0, [current[0], current[1]])
+        path.append([current[0], current[1]])
 
+    path.reverse()
     return path
 
 
@@ -79,7 +80,7 @@ def a_star(grid_map, start, goal):
         if cost > costs.get(current, math.inf):
             continue
         if current == goal:
-            return reconstruct_path(came_from, current, start, rows)
+            return reconstruct_path(came_from, current, start)
         neighbors, distances = get_neighbors(current, grid_map, rows, cols)
         for neighbor, distance in zip(neighbors, distances):
             candidate = cost + distance

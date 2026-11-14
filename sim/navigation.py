@@ -1,4 +1,5 @@
 import math
+import time
 
 import numpy as np
 from scipy.ndimage import binary_dilation
@@ -6,6 +7,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.time import Time
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.signals import SignalHandlerOptions
 from geometry_msgs.msg import Twist, TwistStamped, PoseStamped
 from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from sensor_msgs.msg import LaserScan
@@ -72,6 +74,7 @@ class RobotNavigation(Node):
 
         # robot and map state
         self.grid_map = None
+        self.raw_grid = None # obstacles + unknown, without inflation (DWA fallback)
         self.map_resolution = 0.05 # grid size [meters]
         self.map_origin = [0.0, 0.0, 0.0] # left-bottom corner
         self.latest_scan = None
@@ -110,6 +113,7 @@ class RobotNavigation(Node):
         inflated = binary_dilation(raw, structure=(xx*xx+yy*yy <= inflation_cells**2))
         # only observed free cells may be used by A* and DWA.
         self.grid_map = (inflated | (data != 0)).astype(np.uint8)
+        self.raw_grid = (data != 0).astype(np.uint8)
 
         remaining = [(x, y, 0.0) for x, y in self.path[self.target_idx:]]
         if remaining and not traversable_trajectory(remaining, self.grid_map, self.map_resolution, self.map_origin):
@@ -141,6 +145,7 @@ class RobotNavigation(Node):
             return
         self.path = []
         self.stop()
+        self.last_stop_reason = None # new goal -> report planning problems again
         self.is_exploring = False
         self.get_logger().info("Manual goal received - auto-drive mode disable.")
 
@@ -216,12 +221,17 @@ class RobotNavigation(Node):
         start_grid = self.nearest_free_cell(*raw_start)
         goal_grid  = self.nearest_free_cell(*raw_goal)
 
-        if start_grid is None or goal_grid is None:
+        if start_grid is None:
+            self.halt('A*: brak wolnego pola startowego obok robota.')
+            return False
+        if goal_grid is None:
+            self.halt('A*: brak wolnego pola w pobliżu celu.')
             return False
         grid_path = a_star(self.grid_map, start_grid, goal_grid)
 
         if not grid_path:
-            self.get_logger().error("A* found no path.")
+            # halt() logs once per reason, so retries every second do not flood the log
+            self.halt('A*: nie znaleziono trasy do celu.')
             return False
 
          # convert matrix indicies to meters
@@ -233,7 +243,7 @@ class RobotNavigation(Node):
     def nearest_free_cell(self, grid_row, grid_col, search_radius=8):
         '''Find nearest free cell'''
         rows, cols = self.grid_map.shape
-        # if git return the current index
+        # if free, return the current index
         if (0 <= grid_row < rows and 0 <= grid_col < cols and self.grid_map[grid_row, grid_col] == 0):
             return (grid_row, grid_col)
 
@@ -360,7 +370,8 @@ class RobotNavigation(Node):
         best_v, best_w = dwa_control(
             current_pose, (self.measured_v, self.measured_w),
             (target_x, target_y), obstacles,
-            self.grid_map, self.map_resolution, self.map_origin, self.dwa_cfg)
+            self.grid_map, self.map_resolution, self.map_origin, self.dwa_cfg,
+            fallback_grid=self.raw_grid)
         if not braking_clear(best_v, best_w, nearby, self.dwa_cfg, scan_age):
             self.halt('Planowany ruch nie zapewnia miejsca na hamowanie: STOP.')
             return
@@ -416,9 +427,16 @@ class RobotNavigation(Node):
     
     def publish_path_for_rviz(self):
         '''Visualize planned path'''
-        msg = Path(); msg.header.frame_id = 'map'; msg.header.stamp = self.get_clock().now().to_msg()
+        msg = Path()
+        msg.header.frame_id = 'map'
+        msg.header.stamp = self.get_clock().now().to_msg()
         for p in self.path:
-            pose = PoseStamped(); pose.header = msg.header; pose.pose.orientation.w = 1.0; pose.pose.position.x = p[0]; pose.pose.position.y = p[1]; msg.poses.append(pose)
+            pose = PoseStamped()
+            pose.header = msg.header
+            pose.pose.orientation.w = 1.0
+            pose.pose.position.x = p[0]
+            pose.pose.position.y = p[1]
+            msg.poses.append(pose)
         self.path_pub.publish(msg)
 
     def publish_velocity(self, velocity):
@@ -440,13 +458,19 @@ class RobotNavigation(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    # Without rclpy's own SIGINT handler the context stays valid after Ctrl+C,
+    # so the final STOP command can still be published.
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = RobotNavigation()
-    try: rclpy.spin(node)
-    except KeyboardInterrupt: node.get_logger().info("Stopping...")
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("Stopping...")
     finally:
         if rclpy.ok():
-            node.stop()
+            for _ in range(3):
+                node.stop()
+                time.sleep(0.02)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
