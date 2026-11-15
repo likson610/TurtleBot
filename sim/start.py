@@ -15,6 +15,7 @@ SLAM = dict(
     transform_publish_period=0.02, map_update_interval=1.0,
     minimum_time_interval=0.1, transform_timeout=0.5, tf_buffer_duration=30.0,
     minimum_travel_distance=0.05, minimum_travel_heading=0.05,
+    check_min_dist_and_heading_precisely=True,
     use_scan_matching=True, do_loop_closing=True,
 )
 
