@@ -21,9 +21,14 @@ def generate_launch_description():
             "pad.launch.py"
         )
     )
+    imu_driver_node = Node(
+        package="bumperbot_firmware",
+        executable="mpu6050_driver.py"
+    )   
 
 
     return LaunchDescription([
         hardware,
         pad,
+        imu_driver_node
     ])
