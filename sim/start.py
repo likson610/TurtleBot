@@ -15,6 +15,7 @@ SLAM = dict(
     transform_publish_period=0.02, map_update_interval=1.0,
     minimum_time_interval=0.1, transform_timeout=0.5, tf_buffer_duration=30.0,
     minimum_travel_distance=0.05, minimum_travel_heading=0.05,
+    check_min_dist_and_heading_precisely=True,
     use_scan_matching=True, do_loop_closing=True,
 )
 
@@ -26,13 +27,11 @@ def positive_number(value):
     return number
 
 
-def parse_args(argv=None):
-    parser = argparse.ArgumentParser(
-        description='Burger + Gazebo + SLAM, bez colcon. Domyślny tryb: manual.',
-    )
-    parser.add_argument('mode', nargs='?', default='manual',
-                        choices=['manual', 'goals', 'explore', 'keys'],
-                        help='manual: jazda ręczna; goals: cel w RViz; explore: eksploracja; keys: WASD')
+def parse_args(argv=None, modes=('manual', 'goals', 'explore', 'keys'), default='manual',
+               description='Burger + Gazebo + SLAM, bez colcon. Domyślny tryb: manual.',
+               mode_help='manual: jazda ręczna; goals: cel w RViz; explore: eksploracja; keys: WASD'):
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument('mode', nargs='?', default=default, choices=list(modes), help=mode_help)
     parser.add_argument('--no-gui', action='store_true', help='Ukryj okno Gazebo; fizyka i sensory nadal działają.')
     parser.add_argument('--no-rviz', action='store_true', help='Nie uruchamiaj RViz.')
     parser.add_argument('--hardware-rendering', action='store_true', help='Nie wymuszaj renderowania na CPU.')
@@ -123,6 +122,7 @@ def run_keyboard(args):
     import termios
     import tty
     import rclpy
+    from rclpy.signals import SignalHandlerOptions
     from geometry_msgs.msg import TwistStamped
 
     descriptor = sys.stdin.fileno()
@@ -138,7 +138,8 @@ def run_keyboard(args):
         publisher.publish(msg)
 
     try:
-        rclpy.init(args=[])
+        # Keep the context valid after Ctrl+C so the final STOP is still published.
+        rclpy.init(args=[], signal_handler_options=SignalHandlerOptions.NO)
         node = rclpy.create_node('wasd_teleop')
         publisher = node.create_publisher(TwistStamped, '/cmd_vel', 10)
         print(f'WASD: W przód | S tył | A/D obrót | SPACJA STOP | Q wyjście\n'
@@ -263,7 +264,10 @@ def build_launch(args):
 
 
 def main(argv=None):
-    args = parse_args(argv)
+    return run(parse_args(argv))
+
+
+def run(args):
     if sys.platform != 'linux':
         print('Uruchom ten skrypt w Ubuntu w maszynie wirtualnej.', file=sys.stderr)
         return 1

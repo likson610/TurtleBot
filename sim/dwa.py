@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 
-from astar import traversable_trajectory
+from astar import traversable_trajectory, world_to_grid
 
 
 class DWAConfig:
@@ -44,16 +44,28 @@ class DWAConfig:
 
 # --- Speed config ---
 
-def dwa_control(pose, velocity, goal, obstacles, grid, resolution, origin, cfg):
+def dynamic_window(current, step, low, high):
+    '''Reachable velocity range; the measured value is clamped first, so low <= high always holds.'''
+    current = min(max(current, low), high)
+    return max(low, current - step), min(high, current + step)
+
+
+def dwa_control(pose, velocity, goal, obstacles, grid, resolution, origin, cfg, fallback_grid=None):
+    '''fallback_grid: map without inflation, used only when the robot already stands
+    inside the inflated area (otherwise every trajectory would be rejected).'''
 
     x, y, theta = pose
     v, w = velocity
     goal_x, goal_y = goal
     # velocity limits (rapid velocity changes are impossible)
-    v_min = max(cfg.min_linear_vel,  v - cfg.max_linear_acc  * cfg.dt)
-    v_max = min(cfg.max_linear_vel,  v + cfg.max_linear_acc  * cfg.dt)
-    w_min = max(cfg.min_angular_vel, w - cfg.max_angular_acc * cfg.dt)
-    w_max = min(cfg.max_angular_vel, w + cfg.max_angular_acc * cfg.dt)
+    v_min, v_max = dynamic_window(v, cfg.max_linear_acc * cfg.dt, cfg.min_linear_vel, cfg.max_linear_vel)
+    w_min, w_max = dynamic_window(w, cfg.max_angular_acc * cfg.dt, cfg.min_angular_vel, cfg.max_angular_vel)
+
+    check_grid = grid
+    row, col = world_to_grid(x, y, resolution, origin)
+    if (fallback_grid is not None and 0 <= row < grid.shape[0] and 0 <= col < grid.shape[1]
+            and grid[row, col]):
+        check_grid = fallback_grid
 
     best_score = -math.inf
     best_v, best_w = 0.0, 0.0
@@ -67,12 +79,14 @@ def dwa_control(pose, velocity, goal, obstacles, grid, resolution, origin, cfg):
     for sv in v_samples:
         for sw in w_samples:
             traj = [(x, y, theta)] + trajectory(x, y, theta, sv, sw, cfg.dt, cfg.predict_time)
-            if not traversable_trajectory(traj, grid, resolution, origin):
+            if not traversable_trajectory(traj, check_grid, resolution, origin):
                 continue
-            min_dist = (cfg.lidar_max_range if obs_arr is None or len(obs_arr) == 0
-                        else path_clearance(traj, obs_arr))
-
-            if min_dist < cfg.robo_radius + cfg.safety_margin: continue
+            if obs_arr is None or len(obs_arr) == 0:
+                min_dist = cfg.lidar_max_range
+            else:
+                min_dist = path_clearance(traj, obs_arr)
+                if not clearance_ok(traj, obs_arr, cfg, min_dist):
+                    continue
 
             # scores base on weights 
             heading_score = score_heading(traj, goal_x, goal_y)
@@ -156,7 +170,21 @@ def braking_path(v, w, linear_deceleration, angular_deceleration, reaction_time,
     return path
 
 
+def clearance_ok(path, points, cfg, clearance=None):
+    '''The path keeps the safety margin or, when the robot is already inside it,
+    never gets closer to an obstacle than it is now (rotating in place or backing away).'''
+    if points is None or len(points) == 0:
+        return True
+    if clearance is None:
+        clearance = path_clearance(path, points)
+    if clearance >= cfg.robo_radius + cfg.safety_margin:
+        return True
+    start = np.asarray(path[0][:2], dtype=float)
+    start_clearance = float(np.linalg.norm(np.asarray(points, dtype=float) - start, axis=1).min())
+    return clearance >= cfg.robo_radius and clearance >= start_clearance - 1e-9
+
+
 def braking_clear(v, w, points, cfg, scan_age=0.0):
     sweep = braking_path(v, w, cfg.max_linear_acc, cfg.max_angular_acc,
                          cfg.reaction_time + max(0.0, scan_age))
-    return path_clearance(sweep, points) >= cfg.robo_radius + cfg.safety_margin
+    return clearance_ok(sweep, points, cfg)
