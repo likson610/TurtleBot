@@ -24,6 +24,25 @@ Visualization Manager:
         Reliability Policy: Reliable
         Durability Policy: Transient Local
         Depth: 1
+    - Class: rviz_default_plugins/Map
+      Name: WiFi heatmap
+      Enabled: true
+      Alpha: 0.6
+      Color Scheme: costmap
+      Draw Behind: false
+      Topic:
+        Value: /wifi/heatmap
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        Depth: 1
+    - Class: rviz_default_plugins/Marker
+      Name: WiFi AP
+      Enabled: true
+      Topic:
+        Value: /wifi/ap
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        Depth: 1
     - Class: rviz_default_plugins/LaserScan
       Name: LaserScan
       Enabled: true

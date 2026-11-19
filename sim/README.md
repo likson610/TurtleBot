@@ -10,7 +10,7 @@ zainstaluj [ROS 2 Jazzy](https://github.com/ros2/ros2_documentation/blob/jazzy/s
 ```bash
 sudo apt update
 sudo apt install -y \
-  python3-numpy python3-scipy \
+  python3-numpy python3-scipy python3-matplotlib \
   ros-jazzy-ros-gz \
   ros-jazzy-turtlebot3-gazebo ros-jazzy-turtlebot3-description \
   ros-jazzy-robot-state-publisher ros-jazzy-slam-toolbox \
@@ -55,7 +55,7 @@ Kliknij drugi terminal. **W/S** to przód i tył, **A/D** to skręt,
 ### Jazda do celu
 
 ```bash
-python3 start_explore.py goal_pose --speed 0.08 --turn 0.3
+python3 start.py goals --speed 0.08 --turn 0.3
 ```
 
 Poczekaj, aż w RViz pojawi się mapa. Wybierz **2D Goal Pose**, kliknij
@@ -64,7 +64,7 @@ w rozpoznanym wolnym obszarze i przeciągnij strzałkę.
 ### Eksploracja
 
 ```bash
-python3 start_explore.py explore --speed 0.08 --turn 0.3
+python3 start.py explore --speed 0.08 --turn 0.3
 ```
 
 Obserwuj przyrost mapy w RViz. Wskazanie celu przez **2D Goal Pose** przełącza
@@ -84,13 +84,42 @@ W trybie jazdy ręcznej uruchom `keys` w drugim terminalu tak jak wyżej.
 W trybach autonomicznych użyj:
 
 ```bash
-python3 start_explore.py explore --world ./room2.sdf --x -0.6 --y -2.7 \
+python3 start.py explore --world ./room2.sdf --x -0.6 --y -2.7 \
   --speed 0.08 --turn 0.3
 ```
 
-Aby jechać do celu wskazanego w RViz, zamień `explore` na `goal_pose`.
+Aby jechać do celu wskazanego w RViz, zamień `explore` na `goals`.
 Opcja `--no-gui` uruchamia symulację bez okna Gazebo, z dostępem do RViz.
 Pozostałe opcje wyświetla `python3 start.py --help`.
+
+## Mapa cieplna WiFi
+
+Opcja `--wifi` uruchamia symulowany pomiar siły sygnału (RSSI) wirtualnego
+routera i nanosi pomiary na mapę SLAM. Działa w trybach `manual`, `goals`
+i `explore`. Najwygodniej użyć `explore`, bo robot sam pokrywa pomieszczenie:
+
+```bash
+python3 start.py explore --wifi --ap 2.5 2.0 --speed 0.08 --turn 0.3
+```
+
+`--ap X Y` to pozycja routera we współrzędnych świata Gazebo (tych samych co
+`--x --y`), domyślnie `2.5 2.0`. W RViz biała kula oznacza router, a warstwa
+**WiFi heatmap** pokazuje średnie RSSI w polach 0.2 × 0.2 m. Kolor czerwony
+oznacza silny sygnał (≥ −40 dBm), a niebieski słaby (≤ −90 dBm).
+
+Model sygnału: `RSSI = −40 − 20·log10(d) − 5 dB × liczba ścian + szum (σ = 2 dB)`.
+Ściany i przeszkody są odczytywane z pliku świata `.sdf`, więc model sięga
+też poza obszar już zmapowany przez SLAM. Parametry (`tx_power`, `path_loss_exp`,
+`wall_loss`, `noise_std`, `resolution`) można zmienić w `wifi_heatmap.py`
+albo przez `--ros-args -p` przy samodzielnym uruchomieniu węzła.
+
+Po **Ctrl+C** pomiary trafiają do `wifi_results/wifi_<data>.csv` (x, y, RSSI
+w układzie `map`) i `.png` (mapa cieplna na tle mapy SLAM; wymaga
+`python3-matplotlib`). Na żywo wartości można podglądać przez
+`ros2 topic echo /wifi/rssi`.
+
+Ten sam węzeł działa z prawdziwym skanerem z `src/wifi_poc`
+(`-p source:=scan -p bssid:=aa:bb:cc:dd:ee:ff`). Wymaga to zbudowanego pakietu `wifi_msgs`.
 
 ## Zapis mapy
 

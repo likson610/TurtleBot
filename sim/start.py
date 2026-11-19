@@ -42,9 +42,15 @@ def parse_args(argv=None, modes=('manual', 'goals', 'explore', 'keys'), default=
                         help='Limit jazdy w goals/explore lub prędkość WASD, m/s (maks. 0.22).')
     parser.add_argument('--turn', type=positive_number, default=0.7,
                         help='Limit skrętu w goals/explore lub skręt WASD, rad/s (maks. 2.84).')
+    parser.add_argument('--wifi', action='store_true',
+                        help='Symulowany pomiar RSSI i mapa cieplna WiFi (/wifi/heatmap); wyniki w wifi_results/.')
+    parser.add_argument('--ap', type=float, nargs=2, metavar=('X', 'Y'), default=[2.5, 2.0],
+                        help='Pozycja routera WiFi we współrzędnych świata Gazebo, m; domyślnie 2.5 2.0.')
     args = parser.parse_args(argv)
     if args.speed > 0.22 or args.turn > 2.84:
         parser.error('Dla Burgera użyj --speed <= 0.22 oraz --turn <= 2.84.')
+    if args.wifi and args.mode == 'keys':
+        parser.error('--wifi dodaj do polecenia symulacji (manual/goals/explore), nie do keys.')
     return args
 
 
@@ -251,6 +257,13 @@ def build_launch(args):
                  '-p', f'max_linear_vel:={args.speed}',
                  '-p', f'max_angular_vel:={args.turn}',
                  '-p', f'min_angular_vel:={-args.turn}'], output='screen',
+        ))
+    if args.wifi:
+        after_spawn.append(ExecuteProcess(
+            cmd=[sys.executable, str(HERE / 'wifi_heatmap.py'), '--ros-args',
+                 '-p', 'use_sim_time:=true', '-p', f'world:={world}',
+                 '-p', f'ap_x:={args.ap[0]:.4f}', '-p', f'ap_y:={args.ap[1]:.4f}',
+                 '-p', f'spawn_x:={args.x:.4f}', '-p', f'spawn_y:={args.y:.4f}'], output='screen',
         ))
 
     def on_spawn_exit(event, _context):
