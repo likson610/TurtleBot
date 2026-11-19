@@ -45,12 +45,20 @@ python3 start.py manual
 
 Terminal 2:
 
+## Klawiatura
 ```bash
 python3 start.py keys --speed 0.08 --turn 0.3
 ```
 
 Kliknij drugi terminal. **W/S** to przód i tył, **A/D** to skręt,
 **Spacja** zatrzymuje robota, a **Q** kończy sterowanie.
+
+## Kontroler
+```bash
+python3 controller.py
+```
+
+Odpalane w osobnym terminalu, sterowanie lewą gałką: przód, tył i boki (kontroler ps4)
 
 ### Jazda do celu
 
