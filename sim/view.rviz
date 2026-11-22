@@ -43,6 +43,14 @@ Visualization Manager:
         Reliability Policy: Reliable
         Durability Policy: Transient Local
         Depth: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Name: WiFi AP estimate
+      Enabled: true
+      Topic:
+        Value: /wifi/ap_estimate
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        Depth: 1
     - Class: rviz_default_plugins/LaserScan
       Name: LaserScan
       Enabled: true

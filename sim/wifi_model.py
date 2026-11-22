@@ -78,6 +78,30 @@ def segment_hits_box(p0, p1, box):
     return True
 
 
+def count_crossings(ax, ay, px, py, walls):
+    '''Vectorised segment_hits_box: number of walls crossed by segments (ax, ay) -> (px, py).
+    Arguments broadcast with numpy rules, e.g. candidates (C, 1) against points (P,) -> (C, P).'''
+    ax, ay, px, py = (np.asarray(v, dtype=float) for v in (ax, ay, px, py))
+    count = np.zeros(np.broadcast_shapes(ax.shape, px.shape), dtype=np.int32)
+    for cx, cy, yaw, hx, hy in walls:
+        c, s = math.cos(yaw), math.sin(yaw)
+        x0, y0 = c*(ax - cx) + s*(ay - cy), -s*(ax - cx) + c*(ay - cy)
+        x1, y1 = c*(px - cx) + s*(py - cy), -s*(px - cx) + c*(py - cy)
+        dx, dy = x1 - x0, y1 - y0
+        t0 = np.zeros(count.shape)
+        t1 = np.ones(count.shape)
+        inside = np.ones(count.shape, dtype=bool)
+        for p, q in ((-dx, x0 + hx), (dx, hx - x0), (-dy, y0 + hy), (dy, hy - y0)):
+            p, q = np.broadcast_to(p, count.shape), np.broadcast_to(q, count.shape)
+            parallel = p == 0
+            inside &= ~(parallel & (q < 0))
+            t = np.divide(q, p, out=np.zeros(count.shape), where=~parallel)
+            t0 = np.where(~parallel & (p < 0), np.maximum(t0, t), t0)
+            t1 = np.where(~parallel & (p > 0), np.minimum(t1, t), t1)
+        count += inside & (t0 <= t1)
+    return count
+
+
 # --- Signal model ---
 
 
@@ -107,6 +131,93 @@ class RssiModel:
         return float(min(max(rssi, self.floor), self.ceiling))
 
 
+# --- Access point localisation ---
+
+
+def _grid_fit(cx, cy, x, y, rssi, walls, wall_loss, d_min):
+    '''For every candidate AP (cx, cy): closed-form P0, n and the sum of squared residuals.'''
+    cx, cy = np.asarray(cx, dtype=float).reshape(-1, 1), np.asarray(cy, dtype=float).reshape(-1, 1)
+    feature = -10.0 * np.log10(np.maximum(np.hypot(x - cx, y - cy), d_min))
+    target = rssi + wall_loss * count_crossings(cx, cy, x, y, walls) if walls else np.broadcast_to(rssi, feature.shape)
+    f_mean, t_mean = feature.mean(axis=1, keepdims=True), target.mean(axis=1, keepdims=True)
+    f_var = ((feature - f_mean) ** 2).sum(axis=1, keepdims=True)
+    n = np.divide(((feature - f_mean) * (target - t_mean)).sum(axis=1, keepdims=True), f_var,
+                  out=np.zeros_like(f_var), where=f_var > 1e-9)
+    p0 = t_mean - n * f_mean
+    sse = ((target - p0 - n * feature) ** 2).sum(axis=1)
+    sse[(n.ravel() < 0.5) | (f_var.ravel() <= 1e-9)] = np.inf  # signal must fall with distance
+    return sse, p0.ravel(), n.ravel()
+
+
+def locate_ap(x, y, rssi, walls=(), wall_loss=5.0, margin=3.0, coarse_step=0.4, fine_step=0.1,
+              max_candidates=1500, d_min=0.1):
+    '''Estimates the AP position from RSSI samples (inverse of RssiModel, without noise).
+
+    Fits RSSI = P0 - 10*n*log10(d) - wall_loss * crossed_walls with unknown AP (x, y), P0, n:
+    1. grid search over candidate AP positions (sample bounding box + margin, coarse grid and
+       then a fine grid around the best cell); for a fixed AP the model is linear in P0 and n,
+       so they have a closed-form least-squares solution,
+    2. refinement of all four parameters with scipy least_squares (wall counts frozen at the
+       current estimate and recomputed until they stop changing).
+
+    Returns None when there are too few samples, otherwise a dict with x, y, tx_power,
+    path_loss_exp, rmse [dB], cov (2x2 covariance of x, y in m^2) and samples.'''
+    from scipy.optimize import least_squares
+
+    x, y, rssi = (np.asarray(v, dtype=float).ravel() for v in (x, y, rssi))
+    if len(rssi) < 5:
+        return None
+    walls = list(walls)
+
+    xmin, xmax = x.min() - margin, x.max() + margin
+    ymin, ymax = y.min() - margin, y.max() + margin
+    step = max(coarse_step, math.sqrt((xmax - xmin) * (ymax - ymin) / max_candidates))
+
+    # 1. Grid search, coarse then fine around the best coarse candidate.
+    gx, gy = np.meshgrid(np.arange(xmin, xmax + 1e-9, step), np.arange(ymin, ymax + 1e-9, step))
+    sse, _, _ = _grid_fit(gx, gy, x, y, rssi, walls, wall_loss, d_min)
+    if not np.isfinite(sse).any():
+        return None
+    best = int(np.argmin(sse))
+    offsets = np.arange(-step, step + 1e-9, fine_step)
+    gx, gy = np.meshgrid(gx.ravel()[best] + offsets, gy.ravel()[best] + offsets)
+    sse, p0, n = _grid_fit(gx, gy, x, y, rssi, walls, wall_loss, d_min)
+    best = int(np.argmin(sse))
+    params = np.array([gx.ravel()[best], gy.ravel()[best], p0[best], min(max(n[best], 0.6), 5.9)])
+
+    # 2. Refinement.
+    def residuals(v, crossings):
+        d = np.maximum(np.hypot(x - v[0], y - v[1]), d_min)
+        return v[2] - 10.0 * v[3] * np.log10(d) - wall_loss * crossings - rssi
+
+    crossings = count_crossings(params[0], params[1], x, y, walls) if walls else np.zeros_like(rssi)
+    for _ in range(3):
+        fit = least_squares(residuals, params, args=(crossings,),
+                            bounds=([-np.inf, -np.inf, -np.inf, 0.5], [np.inf, np.inf, np.inf, 6.0]))
+        params = fit.x
+        if not walls:
+            break
+        new_crossings = count_crossings(params[0], params[1], x, y, walls)
+        if np.array_equal(new_crossings, crossings):
+            break
+        crossings = new_crossings
+
+    res = residuals(params, crossings)
+    dof = max(len(rssi) - 4, 1)
+    cov = np.linalg.pinv(fit.jac.T @ fit.jac) * float(res @ res) / dof
+    return {'x': float(params[0]), 'y': float(params[1]),
+            'tx_power': float(params[2]), 'path_loss_exp': float(params[3]),
+            'rmse': float(math.sqrt(np.mean(res ** 2))), 'cov': cov[:2, :2], 'samples': len(rssi)}
+
+
+def error_ellipse(cov, sigma=2.0):
+    '''(width, height, angle_rad) of the sigma-ellipse of a 2x2 covariance (full axis lengths).'''
+    values, vectors = np.linalg.eigh(np.asarray(cov, dtype=float))
+    values = np.maximum(values, 0.0)
+    angle = math.atan2(vectors[1, 1], vectors[0, 1])  # direction of the larger eigenvalue
+    return 2*sigma*math.sqrt(values[1]), 2*sigma*math.sqrt(values[0]), angle
+
+
 # --- Heatmap ---
 
 
@@ -129,6 +240,21 @@ class HeatmapGrid:
 
     def means(self):
         return {key: self.sums[key] / self.counts[key] for key in self.sums}
+
+    def cell_points(self):
+        '''Per-cell mean position and RSSI as arrays (x, y, rssi): less noise and fewer points
+        than raw samples, and long stops in one place do not dominate a fit.'''
+        acc = {}
+        for _, x, y, rssi in self.samples:
+            a = acc.setdefault(self.cell(x, y), [0.0, 0.0, 0.0, 0])
+            a[0] += x
+            a[1] += y
+            a[2] += rssi
+            a[3] += 1
+        if not acc:
+            return np.empty(0), np.empty(0), np.empty(0)
+        values = np.array([[a[0] / a[3], a[1] / a[3], a[2] / a[3]] for a in acc.values()])
+        return values[:, 0], values[:, 1], values[:, 2]
 
     def to_occupancy(self, rssi_min=-90.0, rssi_max=-40.0, bounds=None):
         '''OccupancyGrid payload: (origin_x, origin_y, width, height, data).
@@ -159,13 +285,15 @@ class HeatmapGrid:
             for stamp, x, y, rssi in self.samples:
                 writer.writerow([f'{stamp:.3f}', f'{x:.3f}', f'{y:.3f}', f'{rssi:.1f}'])
 
-    def save_png(self, path, slam_map=None, ap=None, rssi_min=-90.0, rssi_max=-40.0):
+    def save_png(self, path, slam_map=None, ap=None, rssi_min=-90.0, rssi_max=-40.0, estimate=None):
         '''Needs matplotlib (python3-matplotlib). Returns False when it is missing.
-        slam_map = (data[h, w] with -1/0..100, resolution, origin_x, origin_y)'''
+        slam_map = (data[h, w] with -1/0..100, resolution, origin_x, origin_y)
+        estimate = result of locate_ap() (in the same frame), drawn with its 2-sigma ellipse.'''
         try:
             import matplotlib
             matplotlib.use('Agg')
             import matplotlib.pyplot as plt
+            from matplotlib.patches import Ellipse
         except ImportError:
             return False
         means = self.means()
@@ -189,7 +317,25 @@ class HeatmapGrid:
             fig.colorbar(shown, ax=ax, label='RSSI [dBm]')
         if ap is not None:
             ax.plot(*ap, marker='*', markersize=16, color='white', markeredgecolor='black', label='AP')
-            ax.legend(loc='upper right')
+        if estimate is not None:
+            width, height, angle = error_ellipse(estimate['cov'])
+            ax.add_patch(Ellipse((estimate['x'], estimate['y']), width, height, angle=math.degrees(angle),
+                                 fill=False, color='magenta', linewidth=2, label='2σ'))
+            ax.plot(estimate['x'], estimate['y'], marker='X', markersize=12, color='magenta',
+                    markeredgecolor='black', linestyle='none', label='AP (estymacja)')
+        if ap is not None or estimate is not None:
+            # imshow fixes the limits to the image; make sure both APs (and the ellipse) are visible.
+            (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+            points = [ap] if ap is not None else []
+            if estimate is not None:
+                reach = max(width, height) / 2
+                points += [(estimate['x'] - reach, estimate['y'] - reach),
+                           (estimate['x'] + reach, estimate['y'] + reach)]
+            for px, py in points:
+                x0, x1, y0, y1 = min(x0, px - 0.3), max(x1, px + 0.3), min(y0, py - 0.3), max(y1, py + 0.3)
+            ax.set_xlim(x0, x1)
+            ax.set_ylim(y0, y1)
+            ax.legend(loc='best', framealpha=0.8)
         ax.set_xlabel('x [m] (map)')
         ax.set_ylabel('y [m] (map)')
         ax.set_title(f'WiFi RSSI - {len(self.samples)} pomiarów')

@@ -126,8 +126,34 @@ w układzie `map`) i `.png` (mapa cieplna na tle mapy SLAM; wymaga
 `python3-matplotlib`). Na żywo wartości można podglądać przez
 `ros2 topic echo /wifi/rssi`.
 
+### Lokalizacja routera
+
+Flaga `--locate-ap` (włącza też `--wifi`) odwraca zadanie: robot sam szacuje,
+gdzie stoi router, na podstawie zebranych pomiarów RSSI.
+
+```bash
+python3 start.py explore --locate-ap --ap 2.5 2.0 --speed 0.08 --turn 0.3
+```
+
+Co 5 s węzeł dopasowuje model `RSSI = P0 − 10·n·log10(d) − 5 dB × liczba ścian`
+do średnich RSSI w polach mapy cieplnej. Nieznane są pozycja routera, `P0` i `n`.
+Najpierw przeszukuje siatkę kandydatów, potem dopracowuje wynik metodą najmniejszych
+kwadratów (`scipy`). W RViz warstwa **WiFi AP estimate** pokazuje fioletową kulę
+(oszacowanie), półprzezroczystą elipsę 2σ i błąd względem prawdziwego routera
+(białej kuli). W terminalu pojawia się m.in. `WiFi: AP ~ (x, y) map, ±σ m (1 sigma), …, błąd … m`.
+Estymacja startuje, gdy jest co najmniej 15 pól z pomiarami rozłożonych na ≥ 1 m.
+
+Po **Ctrl+C** dochodzi plik `wifi_results/wifi_<data>_ap.csv` z historią
+oszacowań (liczba pól, pozycja, `P0`, `n`, RMSE, σ, błąd), z którego można
+narysować spadek błędu w czasie. Końcowe oszacowanie z elipsą jest też na `.png`.
+
+Parametry węzła: `locate_period` (s), `locate_min_cells`, `locate_wall_loss` (dB)
+i `locate_walls` (`false` wyłącza model ścian, co daje wyraźnie gorszy wynik
+w pomieszczeniach ze ścianami działowymi).
+
 Ten sam węzeł działa z prawdziwym skanerem z `src/wifi_poc`
-(`-p source:=scan -p bssid:=aa:bb:cc:dd:ee:ff`). Wymaga to zbudowanego pakietu `wifi_msgs`.
+(`-p source:=scan -p bssid:=aa:bb:cc:dd:ee:ff`, opcjonalnie `-p locate_ap:=true`;
+bez świata `.sdf` model ścian jest pomijany). Wymaga to zbudowanego pakietu `wifi_msgs`.
 
 ## Zapis mapy
 
