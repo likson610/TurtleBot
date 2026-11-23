@@ -73,6 +73,46 @@ class WiFiHeatmapNode(Node):
         except tf2_ros.TransformException as ex:
             print(f"[WARN TF] Brak pozycji ze SLAM-a w tym momencie: {ex}", flush=True)
 
+    def generate_heatmap(self):
+        if len(self.measurements) < 4:
+            return
+
+        data = np.array(self.measurements)
+        xs, ys, rssis = data[:, 0], data[:, 1], data[:, 2]
+
+        min_x, max_x = xs.min() - 1.0, xs.max() + 1.0
+        min_y, max_y = ys.min() - 1.0, ys.max() + 1.0
+
+        grid_x, grid_y = np.mgrid[
+            min_x:max_x:self.resolution,
+            min_y:max_y:self.resolution
+        ]
+
+        try:
+            rbf = Rbf(xs, ys, rssis, function='linear', smooth=0.5)
+            interp_rssi = rbf(grid_x, grid_y)
+        except Exception as e:
+            print(f"[ERROR RBF] Błąd interpolacji: {e}", flush=True)
+            return
+
+        norm_grid = (interp_rssi - self.min_rssi) / (self.max_rssi - self.min_rssi) * 100.0
+        norm_grid = np.clip(norm_grid, 0, 100).astype(np.int8)
+
+        grid_msg = OccupancyGrid()
+        grid_msg.header.stamp = self.get_clock().now().to_msg()
+        grid_msg.header.frame_id = self.map_frame
+
+        grid_msg.info.resolution = float(self.resolution)
+        grid_msg.info.width = int(grid_x.shape[0])
+        grid_msg.info.height = int(grid_x.shape[1])
+        grid_msg.info.origin.position.x = float(min_x)
+        grid_msg.info.origin.position.y = float(min_y)
+        grid_msg.info.origin.position.z = 0.0
+        grid_msg.info.origin.orientation.w = 1.0
+
+        grid_msg.data = norm_grid.T.flatten().tolist()
+        self.pub_grid.publish(grid_msg)
+
 
 def main(args=None):
     rclpy.init(args=args)
