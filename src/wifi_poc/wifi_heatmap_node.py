@@ -68,9 +68,10 @@ class WiFiHeatmapNode(Node):
                     return
 
             self.measurements.append((x, y, chosen_rssi))
+            print(f"[MAP] Punkt #{len(self.measurements)}: x={x:.2f}m, y={y:.2f}m | RSSI={chosen_rssi:.1f} dBm", flush=True)
 
         except tf2_ros.TransformException as ex:
-            return
+            print(f"[WARN TF] Brak pozycji ze SLAM-a w tym momencie: {ex}", flush=True)
 
 
 def main(args=None):
