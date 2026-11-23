@@ -46,12 +46,18 @@ def parse_args(argv=None, modes=('manual', 'goals', 'explore', 'keys'), default=
                         help='Symulowany pomiar RSSI i mapa cieplna WiFi (/wifi/heatmap); wyniki w wifi_results/.')
     parser.add_argument('--ap', type=float, nargs=2, metavar=('X', 'Y'), default=[2.5, 2.0],
                         help='Pozycja routera WiFi we współrzędnych świata Gazebo, m; domyślnie 2.5 2.0.')
+    parser.add_argument('--wall-loss', type=float, default=5.0, metavar='DB',
+                        help='Tłumienie WiFi na ścianę (przeszkoda >= 0.9 m wysokości), dB; domyślnie 5.')
+    parser.add_argument('--obstacle-loss', type=float, default=2.0, metavar='DB',
+                        help='Tłumienie WiFi na niższą przeszkodę (meble), dB; domyślnie 2.')
     parser.add_argument('--locate-ap', action='store_true',
                         help='Szacuj pozycję routera z pomiarów RSSI (/wifi/ap_estimate); włącza --wifi.')
     args = parser.parse_args(argv)
     if args.speed > 0.22 or args.turn > 2.84:
         parser.error('Dla Burgera użyj --speed <= 0.22 oraz --turn <= 2.84.')
     args.wifi = args.wifi or args.locate_ap
+    if args.wall_loss < 0 or args.obstacle_loss < 0:
+        parser.error('--wall-loss i --obstacle-loss muszą być >= 0 dB.')
     if args.wifi and args.mode == 'keys':
         parser.error('--wifi dodaj do polecenia symulacji (manual/goals/explore), nie do keys.')
     return args
@@ -267,6 +273,7 @@ def build_launch(args):
                  '-p', 'use_sim_time:=true', '-p', f'world:={world}',
                  '-p', f'ap_x:={args.ap[0]:.4f}', '-p', f'ap_y:={args.ap[1]:.4f}',
                  '-p', f'spawn_x:={args.x:.4f}', '-p', f'spawn_y:={args.y:.4f}',
+                 '-p', f'wall_loss:={args.wall_loss:.2f}', '-p', f'obstacle_loss:={args.obstacle_loss:.2f}',
                  '-p', f'locate_ap:={str(args.locate_ap).lower()}'], output='screen',
         ))
 

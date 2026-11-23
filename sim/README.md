@@ -115,11 +115,32 @@ python3 start.py explore --wifi --ap 2.5 2.0 --speed 0.08 --turn 0.3
 **WiFi heatmap** pokazuje średnie RSSI w polach 0.2 × 0.2 m. Kolor czerwony
 oznacza silny sygnał (≥ −40 dBm), a niebieski słaby (≤ −90 dBm).
 
-Model sygnału: `RSSI = −40 − 20·log10(d) − 5 dB × liczba ścian + szum (σ = 2 dB)`.
+Model sygnału: `RSSI = −40 − 20·log10(d) − Σ tłumienie przeciętych przeszkód + szum (σ = 2 dB)`.
 Ściany i przeszkody są odczytywane z pliku świata `.sdf`, więc model sięga
-też poza obszar już zmapowany przez SLAM. Parametry (`tx_power`, `path_loss_exp`,
-`wall_loss`, `noise_std`, `resolution`) można zmienić w `wifi_heatmap.py`
-albo przez `--ros-args -p` przy samodzielnym uruchomieniu węzła.
+też poza obszar już zmapowany przez SLAM.
+
+Tłumienie zależy od rodzaju przeszkody, rozpoznawanego po wysokości bryły w `.sdf`:
+
+| Przeszkoda | Rozpoznanie | Domyślnie | Flaga |
+|---|---|---|---|
+| Ściana, filar | wysokość ≥ 0.9 m | 5 dB | `--wall-loss DB` |
+| Mebel, skrzynia, regał | wysokość < 0.9 m | 2 dB | `--obstacle-loss DB` |
+
+Każde przecięcie linii router–robot z przeszkodą odejmuje jej tłumienie, więc
+za dwiema ścianami sygnał jest słabszy o 2 × `--wall-loss`. Orientacyjne
+wartości dla 2.4 GHz: ścianka gipsowa 3–5 dB, cegła 6–10 dB, beton 10–15 dB.
+Przykład dla budynku z murowanymi ścianami:
+
+```bash
+python3 start.py explore --wifi --world ./room2.sdf --x -0.6 --y -2.7 \
+  --wall-loss 10 --obstacle-loss 3 --speed 0.08 --turn 0.3
+```
+
+Przy starcie węzeł wypisuje podział, np. `22 przeszkód z room2.sdf: 18 ścian
+po 10.0 dB, 4 niższych (meble) po 3.0 dB`. Pozostałe parametry (`tx_power`,
+`path_loss_exp`, `noise_std`, `resolution`, `full_height` – próg wysokości
+ściany) można zmienić w `wifi_heatmap.py` albo przez `--ros-args -p`
+przy samodzielnym uruchomieniu węzła.
 
 Po **Ctrl+C** pomiary trafiają do `wifi_results/wifi_<data>.csv` (x, y, RSSI
 w układzie `map`) i `.png` (mapa cieplna na tle mapy SLAM; wymaga
@@ -135,7 +156,7 @@ gdzie stoi router, na podstawie zebranych pomiarów RSSI.
 python3 start.py explore --locate-ap --ap 2.5 2.0 --speed 0.08 --turn 0.3
 ```
 
-Co 5 s węzeł dopasowuje model `RSSI = P0 − 10·n·log10(d) − 5 dB × liczba ścian`
+Co 5 s węzeł dopasowuje model `RSSI = P0 − 10·n·log10(d) − Σ tłumienie ścian`
 do średnich RSSI w polach mapy cieplnej. Nieznane są pozycja routera, `P0` i `n`.
 Najpierw przeszukuje siatkę kandydatów, potem dopracowuje wynik metodą najmniejszych
 kwadratów (`scipy`). W RViz warstwa **WiFi AP estimate** pokazuje fioletową kulę
@@ -147,8 +168,10 @@ Po **Ctrl+C** dochodzi plik `wifi_results/wifi_<data>_ap.csv` z historią
 oszacowań (liczba pól, pozycja, `P0`, `n`, RMSE, σ, błąd), z którego można
 narysować spadek błędu w czasie. Końcowe oszacowanie z elipsą jest też na `.png`.
 
-Parametry węzła: `locate_period` (s), `locate_min_cells`, `locate_wall_loss` (dB)
-i `locate_walls` (`false` wyłącza model ścian, co daje wyraźnie gorszy wynik
+Lokalizacja przyjmuje to samo tłumienie przeszkód co symulacja (`--wall-loss`,
+`--obstacle-loss`). Parametry węzła: `locate_period` (s), `locate_min_cells`,
+`locate_wall_loss` (dB, jedna wartość dla wszystkich przeszkód zamiast tłumienia
+z symulacji, np. do sprawdzenia skutków błędnego założenia) i `locate_walls` (`false` wyłącza model ścian, co daje wyraźnie gorszy wynik
 w pomieszczeniach ze ścianami działowymi).
 
 Ten sam węzeł działa z prawdziwym skanerem z `src/wifi_poc`

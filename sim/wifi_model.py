@@ -1,7 +1,8 @@
 """WiFi RSSI model and heatmap grid (no ROS dependencies, testable on its own).
 
 - load_walls(): reads box obstacles from the Gazebo world (.sdf),
-- RssiModel: log-distance path loss + attenuation of every crossed wall + noise,
+- obstacle_losses(): attenuation per obstacle - full-height walls vs low furniture,
+- RssiModel: log-distance path loss + attenuation of every crossed obstacle + noise,
 - HeatmapGrid: averages measurements per cell, converts them to an OccupancyGrid
   payload and saves CSV / PNG.
 """
@@ -31,12 +32,13 @@ def _compose(parent, child):
     return px + c*cx - s*cy, py + s*cx + c*cy, pyaw + cyaw
 
 
-def load_walls(sdf_path):
+def load_walls(sdf_path, with_heights=False):
     '''Box collisions of top-level models as (center_x, center_y, yaw, half_x, half_y).
-    Planes (floor), cylinders and <include> models are ignored.'''
+    Planes (floor), cylinders and <include> models are ignored.
+    with_heights=True returns (walls, heights) with the box height in metres.'''
     root = ET.parse(sdf_path).getroot()
     world = root.find('world')
-    walls = []
+    walls, heights = [], []
     for model in (world if world is not None else root).findall('model'):
         model_pose = _pose2d(model)
         for link in model.findall('link'):
@@ -45,10 +47,27 @@ def load_walls(sdf_path):
                 size = collision.find('geometry/box/size')
                 if size is None:
                     continue
-                sx, sy = (float(v) for v in size.text.split()[:2])
+                sx, sy, sz = (float(v) for v in (size.text.split() + ['0'] * 3)[:3])
                 cx, cy, yaw = _compose(link_pose, _pose2d(collision))
                 walls.append((cx, cy, yaw, sx / 2, sy / 2))
-    return walls
+                heights.append(sz)
+    return (walls, heights) if with_heights else walls
+
+
+def obstacle_losses(heights, wall_loss=5.0, obstacle_loss=2.0, full_height=0.9):
+    '''Attenuation [dB] of each obstacle: full-height boxes (walls, pillars) take wall_loss,
+    lower ones (furniture, crates, shelves) take obstacle_loss.'''
+    return [wall_loss if h >= full_height else obstacle_loss for h in heights]
+
+
+def _per_wall(loss, walls):
+    '''Scalar or per-wall attenuation -> array of len(walls).'''
+    loss = np.asarray(loss, dtype=float)
+    if loss.ndim == 0:
+        return np.full(len(walls), float(loss))
+    if len(loss) != len(walls):
+        raise ValueError(f'{len(loss)} wartości tłumienia dla {len(walls)} przeszkód')
+    return loss
 
 
 def segment_hits_box(p0, p1, box):
@@ -78,12 +97,15 @@ def segment_hits_box(p0, p1, box):
     return True
 
 
-def count_crossings(ax, ay, px, py, walls):
+def count_crossings(ax, ay, px, py, walls, weights=None):
     '''Vectorised segment_hits_box: number of walls crossed by segments (ax, ay) -> (px, py).
-    Arguments broadcast with numpy rules, e.g. candidates (C, 1) against points (P,) -> (C, P).'''
+    Arguments broadcast with numpy rules, e.g. candidates (C, 1) against points (P,) -> (C, P).
+    With weights (one per wall, e.g. attenuation in dB) returns the weighted sum instead.'''
     ax, ay, px, py = (np.asarray(v, dtype=float) for v in (ax, ay, px, py))
-    count = np.zeros(np.broadcast_shapes(ax.shape, px.shape), dtype=np.int32)
-    for cx, cy, yaw, hx, hy in walls:
+    shape = np.broadcast_shapes(ax.shape, px.shape)
+    count = np.zeros(shape, dtype=np.int32) if weights is None else np.zeros(shape)
+    weights = [1] * len(walls) if weights is None else weights
+    for (cx, cy, yaw, hx, hy), weight in zip(walls, weights):
         c, s = math.cos(yaw), math.sin(yaw)
         x0, y0 = c*(ax - cx) + s*(ay - cy), -s*(ax - cx) + c*(ay - cy)
         x1, y1 = c*(px - cx) + s*(py - cy), -s*(px - cx) + c*(py - cy)
@@ -98,7 +120,7 @@ def count_crossings(ax, ay, px, py, walls):
             t = np.divide(q, p, out=np.zeros(count.shape), where=~parallel)
             t0 = np.where(~parallel & (p < 0), np.maximum(t0, t), t0)
             t1 = np.where(~parallel & (p > 0), np.minimum(t1, t), t1)
-        count += inside & (t0 <= t1)
+        count += weight * (inside & (t0 <= t1))
     return count
 
 
@@ -106,24 +128,31 @@ def count_crossings(ax, ay, px, py, walls):
 
 
 class RssiModel:
-    '''RSSI [dBm] = tx_power - 10*n*log10(d / 1 m) - wall_loss * crossed_walls + noise'''
+    '''RSSI [dBm] = tx_power - 10*n*log10(d / 1 m) - sum(loss of every crossed obstacle) + noise
+
+    wall_loss: one value for all obstacles or a list with one value per wall (obstacle_losses()).'''
 
     def __init__(self, ap, walls=(), tx_power=-40.0, path_loss_exp=2.0, wall_loss=5.0,
                  noise_std=2.0, floor=-95.0, ceiling=-30.0, seed=None):
         self.ap = (float(ap[0]), float(ap[1]))
         self.walls = list(walls)
         self.tx_power, self.path_loss_exp = tx_power, path_loss_exp
-        self.wall_loss, self.noise_std = wall_loss, noise_std
+        self.wall_loss, self.noise_std = _per_wall(wall_loss, self.walls), noise_std
         self.floor, self.ceiling = floor, ceiling
         self.rng = np.random.default_rng(seed)
 
     def crossed_walls(self, x, y):
         return sum(segment_hits_box(self.ap, (x, y), wall) for wall in self.walls)
 
+    def attenuation(self, x, y):
+        '''Total loss [dB] of the obstacles between the AP and (x, y).'''
+        return float(sum(loss for wall, loss in zip(self.walls, self.wall_loss)
+                         if segment_hits_box(self.ap, (x, y), wall)))
+
     def expected(self, x, y):
         distance = max(math.hypot(x - self.ap[0], y - self.ap[1]), 0.1)
         rssi = (self.tx_power - 10.0 * self.path_loss_exp * math.log10(distance)
-                - self.wall_loss * self.crossed_walls(x, y))
+                - self.attenuation(x, y))
         return min(max(rssi, self.floor), self.ceiling)
 
     def measure(self, x, y):
@@ -138,7 +167,7 @@ def _grid_fit(cx, cy, x, y, rssi, walls, wall_loss, d_min):
     '''For every candidate AP (cx, cy): closed-form P0, n and the sum of squared residuals.'''
     cx, cy = np.asarray(cx, dtype=float).reshape(-1, 1), np.asarray(cy, dtype=float).reshape(-1, 1)
     feature = -10.0 * np.log10(np.maximum(np.hypot(x - cx, y - cy), d_min))
-    target = rssi + wall_loss * count_crossings(cx, cy, x, y, walls) if walls else np.broadcast_to(rssi, feature.shape)
+    target = rssi + count_crossings(cx, cy, x, y, walls, wall_loss) if walls else np.broadcast_to(rssi, feature.shape)
     f_mean, t_mean = feature.mean(axis=1, keepdims=True), target.mean(axis=1, keepdims=True)
     f_var = ((feature - f_mean) ** 2).sum(axis=1, keepdims=True)
     n = np.divide(((feature - f_mean) * (target - t_mean)).sum(axis=1, keepdims=True), f_var,
@@ -153,12 +182,13 @@ def locate_ap(x, y, rssi, walls=(), wall_loss=5.0, margin=3.0, coarse_step=0.4, 
               max_candidates=1500, d_min=0.1):
     '''Estimates the AP position from RSSI samples (inverse of RssiModel, without noise).
 
-    Fits RSSI = P0 - 10*n*log10(d) - wall_loss * crossed_walls with unknown AP (x, y), P0, n:
+    Fits RSSI = P0 - 10*n*log10(d) - attenuation of crossed walls with unknown AP (x, y), P0, n
+    (wall_loss: one value for all walls or one per wall, as in RssiModel):
     1. grid search over candidate AP positions (sample bounding box + margin, coarse grid and
        then a fine grid around the best cell); for a fixed AP the model is linear in P0 and n,
        so they have a closed-form least-squares solution,
-    2. refinement of all four parameters with scipy least_squares (wall counts frozen at the
-       current estimate and recomputed until they stop changing).
+    2. refinement of all four parameters with scipy least_squares (wall attenuation frozen at
+       the current estimate and recomputed until it stops changing).
 
     Returns None when there are too few samples, otherwise a dict with x, y, tx_power,
     path_loss_exp, rmse [dB], cov (2x2 covariance of x, y in m^2) and samples.'''
@@ -168,6 +198,7 @@ def locate_ap(x, y, rssi, walls=(), wall_loss=5.0, margin=3.0, coarse_step=0.4, 
     if len(rssi) < 5:
         return None
     walls = list(walls)
+    wall_loss = _per_wall(wall_loss, walls)
 
     xmin, xmax = x.min() - margin, x.max() + margin
     ymin, ymax = y.min() - margin, y.max() + margin
@@ -186,23 +217,23 @@ def locate_ap(x, y, rssi, walls=(), wall_loss=5.0, margin=3.0, coarse_step=0.4, 
     params = np.array([gx.ravel()[best], gy.ravel()[best], p0[best], min(max(n[best], 0.6), 5.9)])
 
     # 2. Refinement.
-    def residuals(v, crossings):
+    def residuals(v, loss_db):
         d = np.maximum(np.hypot(x - v[0], y - v[1]), d_min)
-        return v[2] - 10.0 * v[3] * np.log10(d) - wall_loss * crossings - rssi
+        return v[2] - 10.0 * v[3] * np.log10(d) - loss_db - rssi
 
-    crossings = count_crossings(params[0], params[1], x, y, walls) if walls else np.zeros_like(rssi)
+    loss_db = count_crossings(params[0], params[1], x, y, walls, wall_loss) if walls else np.zeros_like(rssi)
     for _ in range(3):
-        fit = least_squares(residuals, params, args=(crossings,),
+        fit = least_squares(residuals, params, args=(loss_db,),
                             bounds=([-np.inf, -np.inf, -np.inf, 0.5], [np.inf, np.inf, np.inf, 6.0]))
         params = fit.x
         if not walls:
             break
-        new_crossings = count_crossings(params[0], params[1], x, y, walls)
-        if np.array_equal(new_crossings, crossings):
+        new_loss_db = count_crossings(params[0], params[1], x, y, walls, wall_loss)
+        if np.array_equal(new_loss_db, loss_db):
             break
-        crossings = new_crossings
+        loss_db = new_loss_db
 
-    res = residuals(params, crossings)
+    res = residuals(params, loss_db)
     dof = max(len(rssi) - 4, 1)
     cov = np.linalg.pinv(fit.jac.T @ fit.jac) * float(res @ res) / dof
     return {'x': float(params[0]), 'y': float(params[1]),

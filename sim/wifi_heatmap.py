@@ -7,6 +7,9 @@ locate_ap:=true - estimates the AP position from the collected RSSI (wifi_model.
 publishes it with a 2-sigma ellipse on /wifi/ap_estimate and logs the error against the true AP
 (sim only). In sim the fit also models the walls from the .sdf world.
 
+Obstacles from the .sdf attenuate the simulated signal: full-height ones (walls, pillars,
+>= full_height m) by wall_loss dB, lower ones (furniture) by obstacle_loss dB per crossing.
+
 On exit (Ctrl+C) the measurements are saved as CSV and PNG to output_dir.
 """
 import csv
@@ -26,7 +29,7 @@ from std_msgs.msg import Float32
 from visualization_msgs.msg import Marker, MarkerArray
 from tf2_ros import Buffer, TransformListener, LookupException, ConnectivityException, ExtrapolationException
 
-from wifi_model import HeatmapGrid, RssiModel, error_ellipse, load_walls, locate_ap
+from wifi_model import HeatmapGrid, RssiModel, error_ellipse, load_walls, locate_ap, obstacle_losses
 
 HERE = Path(__file__).resolve().parent
 LATCHED = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -49,6 +52,7 @@ class WifiHeatmap(Node):
         self.slam_map = None
         self.last_rssi = None
         self.walls_map = []  # walls in the map frame, used by the AP localisation
+        self.wall_losses = []  # attenuation of each wall [dB]
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -59,19 +63,24 @@ class WifiHeatmap(Node):
 
         if self.source == 'sim':
             world = p('world', str(HERE / 'room.sdf')).value
-            walls = load_walls(world)
+            walls, heights = load_walls(world, with_heights=True)
+            wall_loss, obstacle_loss = p('wall_loss', 5.0).value, p('obstacle_loss', 2.0).value
+            full_height = p('full_height', 0.9).value
+            self.wall_losses = obstacle_losses(heights, wall_loss, obstacle_loss, full_height)
             seed = p('seed', -1).value
             self.model = RssiModel(
                 self.ap_world, walls,
                 tx_power=p('tx_power', -40.0).value, path_loss_exp=p('path_loss_exp', 2.0).value,
-                wall_loss=p('wall_loss', 5.0).value, noise_std=p('noise_std', 2.0).value,
+                wall_loss=self.wall_losses, noise_std=p('noise_std', 2.0).value,
                 seed=None if seed < 0 else seed)
+            n_walls = sum(h >= full_height for h in heights)
             self.create_timer(p('sample_period', 1.0).value, self.sample_sim)
             self.walls_map = [(cx - self.spawn[0], cy - self.spawn[1], yaw, hx, hy)
                               for cx, cy, yaw, hx, hy in walls]
             self.get_logger().info(
                 f'WiFi (symulacja): AP w ({self.ap_world[0]:.2f}, {self.ap_world[1]:.2f}) świata, '
-                f'{len(walls)} przeszkód z {Path(world).name}.')
+                f'{len(walls)} przeszkód z {Path(world).name}: {n_walls} ścian po {wall_loss:.1f} dB, '
+                f'{len(walls) - n_walls} niższych (meble) po {obstacle_loss:.1f} dB.')
         elif self.source == 'scan':
             from wifi_msgs.msg import WiFiScan  # built from src/wifi_poc/wifi_msgs
             self.bssid = p('bssid', '').value.lower()
@@ -91,13 +100,16 @@ class WifiHeatmap(Node):
         if self.locate:
             if not p('locate_walls', True).value:
                 self.walls_map = []
-            self.locate_wall_loss = p('locate_wall_loss', 5.0).value
+            # < 0: the locator assumes the same per-obstacle attenuation as the simulation
+            override = p('locate_wall_loss', -1.0).value
+            self.locate_wall_loss = override if override >= 0 or not self.walls_map else self.wall_losses
             self.locate_min_cells = p('locate_min_cells', 15).value
             self.estimate_pub = self.create_publisher(MarkerArray, '/wifi/ap_estimate', LATCHED)
             self.create_timer(p('locate_period', 5.0).value, self.start_locate)
+            loss = (f'{override:.1f} dB każda' if override >= 0 or not self.walls_map
+                    else 'tłumienie jak w symulacji')
             self.get_logger().info(
-                f'WiFi: lokalizacja AP włączona (model ścian: {len(self.walls_map)} przeszkód, '
-                f'tłumienie {self.locate_wall_loss:.1f} dB).')
+                f'WiFi: lokalizacja AP włączona (model ścian: {len(self.walls_map)} przeszkód, {loss}).')
 
     # --- inputs ---
 
