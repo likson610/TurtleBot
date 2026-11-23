@@ -1,0 +1,8 @@
+wifi_heatmap_node:
+  ros__parameters:
+    target_ssid: "" #jeśli puste - najsilniejszy syganł
+    target_bssid: "" #tak samo
+    resolution: 0.2 #rozdzielczosc siatki [m]
+    min_rssi: -95.0 #minimum do skali w occupancy grid
+    max_rssi: -30.0 #maksimum
+    map_frame: "map"

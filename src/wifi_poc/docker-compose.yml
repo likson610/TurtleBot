@@ -12,5 +12,29 @@ services:
       - ROS_DOMAIN_ID=0
       - PYTHONUNBUFFERED=1
       - WIFI_INTERFACE=wlan1
-      - SCAN_FREQUENCIES=2412 2417 2422 2427 2432 2437 2442 2447 2452 2457 2462 2467 2472
+      - SCAN_FREQUENCIES=2412 2437 2462
+    command: ["python3", "-u", "/app/wifi_scanner.py"]
+    restart: unless-stopped
+
+  wifi_heatmap:
+    build: .
+    container_name: ros2_wifi_heatmap
+    network_mode: "host"
+    ipc: "host"
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      - ROS_DOMAIN_ID=0
+      - PYTHONUNBUFFERED=1
+    command:
+      [
+        "python3",
+        "-u",
+        "/app/wifi_heatmap_node.py",
+        "--ros-args",
+        "--params-file",
+        "/app/config/wifi_heatmap_params.yaml"
+      ]
+    depends_on:
+      - wifi_scanner
     restart: unless-stopped
