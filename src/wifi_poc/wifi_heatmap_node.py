@@ -36,6 +36,43 @@ class WiFiHeatmapNode(Node):
 
         self.update_timer = self.create_timer(3.0, self.generate_heatmap)
 
+    def scan_callback(self, msg: WiFiScan):
+        chosen_rssi = None
+        for net in msg.networks:
+            if self.target_bssid and net.bssid.lower() == self.target_bssid.lower():
+                chosen_rssi = net.rssi_dbm
+                break
+            elif self.target_ssid and net.ssid == self.target_ssid:
+                chosen_rssi = net.rssi_dbm
+                break
+
+        if chosen_rssi is None and len(msg.networks) > 0 and not self.target_ssid and not self.target_bssid:
+            chosen_rssi = max(net.rssi_dbm for net in msg.networks)
+
+        if chosen_rssi is None:
+            return
+
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.map_frame,
+                msg.header.frame_id,
+                msg.header.stamp,
+                timeout=Duration(seconds=0.3)
+            )
+            x = transform.transform.translation.x
+            y = transform.transform.translation.y
+
+            if len(self.measurements) > 0:
+                last_x, last_y, _ = self.measurements[-1]
+                if np.hypot(x - last_x, y - last_y) < 0.10:
+                    return
+
+            self.measurements.append((x, y, chosen_rssi))
+
+        except tf2_ros.TransformException as ex:
+            return
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = WiFiHeatmapNode()
