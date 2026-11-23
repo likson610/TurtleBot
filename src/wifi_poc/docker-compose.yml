@@ -21,10 +21,20 @@ services:
     container_name: ros2_wifi_heatmap
     network_mode: "host"
     ipc: "host"
+    volumes:
+      - ./config:/app/config:ro
     environment:
       - ROS_DOMAIN_ID=0
       - PYTHONUNBUFFERED=1
-    command: ["python3", "-u", "/app/wifi_heatmap_node.py"]
+    command:
+      [
+        "python3",
+        "-u",
+        "/app/wifi_heatmap_node.py",
+        "--ros-args",
+        "--params-file",
+        "/app/config/wifi_heatmap_params.yaml"
+      ]
     depends_on:
       - wifi_scanner
     restart: unless-stopped
