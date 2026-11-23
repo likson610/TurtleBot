@@ -4,6 +4,10 @@ from rclpy.duration import Duration
 import numpy as np
 from scipy.interpolate import Rbf
 
+import tf2_ros
+from nav_msgs.msg import OccupancyGrid
+from wifi_msgs.msg import WiFiScan
+
 class WiFiHeatmapNode(Node):
     def __init__(self):
         super().__init__('wifi_heatmap_node')
