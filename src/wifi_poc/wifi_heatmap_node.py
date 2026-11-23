@@ -28,6 +28,14 @@ class WiFiHeatmapNode(Node):
 
         self.measurements = []
 
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+
+        self.sub_scan = self.create_subscription(WiFiScan, '/wifi/scan', self.scan_callback, 10)
+        self.pub_grid = self.create_publisher(OccupancyGrid, '/wifi/heatmap', 1)
+
+        self.update_timer = self.create_timer(3.0, self.generate_heatmap)
+
 def main(args=None):
     rclpy.init(args=args)
     node = WiFiHeatmapNode()
